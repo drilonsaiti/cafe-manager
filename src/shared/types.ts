@@ -29,3 +29,8 @@ export interface Report {
   employees: { name: string; orders: number; cents: number }[]
   voids: { count: number; cents: number }
 }
+export interface MenuData { version: number; categories: Category[]; products: Product[] }
+export interface Workspace { order: Order | null; top: Product[]; menu: MenuData | null }
+export interface LoginResult { user: User; tables: TableRow[] }
+export interface HistoryPage { rows: HistoryRow[]; total: number }
+export interface BootData { settings: Settings; employees: Employee[] }

@@ -1,13 +1,13 @@
 import { BrowserWindow, app, dialog } from 'electron'
 import type { OpenDialogOptions, SaveDialogOptions, MessageBoxOptions } from 'electron'
-import { copyFileSync, rmSync, writeFileSync } from 'node:fs'
+import { closeSync, copyFileSync, openSync, rmSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
-import { all, one, run, tx, dbPath, closeDb, getSettings, DEFAULTS, makeBackup, backupDir } from './db'
+import { all, one, run, tx, prepared, dbPath, closeDb, getSettings, invalidateSettings, DEFAULTS, makeBackup, backupDir } from './db'
 import { orderRows, testRows, printRows } from './print'
 import { adminUser, checkLock, clearFails, hashPin, int, me, recordFail, setSession, text, verifyPin } from './security'
 import type {
-  Category, Employee, HistoryRow, Order, OrderItem, Product, Report, Settings, SettingKey, TableRow, User
+  BootData, Category, Employee, HistoryPage, HistoryRow, LoginResult, Order, OrderItem, Product, Report, Settings, SettingKey, TableRow, User, Workspace
 } from '../shared/types'
 
 const now = (): number => Date.now()
@@ -17,19 +17,70 @@ const openDlg = (o: OpenDialogOptions) => { const w = win(); return w ? dialog.s
 const msgDlg = (o: MessageBoxOptions) => { const w = win(); return w ? dialog.showMessageBox(w, o) : dialog.showMessageBox(o) }
 
 const PRODUCT_COLS = 'id, category_id AS categoryId, name, price_cents AS priceCents, active'
-const ORDER_COLS = `id, table_id AS tableId, table_name AS tableName, employee_id AS employeeId,
-  employee_name AS employeeName, status, opened_at AS openedAt, closed_at AS closedAt, total_cents AS totalCents`
+const ORDER_COLS = `o.id, o.table_id AS tableId, o.table_name AS tableName, o.employee_id AS employeeId,
+  o.employee_name AS employeeName, o.status, o.opened_at AS openedAt, o.closed_at AS closedAt, o.total_cents AS totalCents`
 
 type ItemRow = { id: number; order_id: number; product_id: number | null; name: string; price_cents: number; qty: number; printed_qty: number }
+type OrderHead = Omit<Order, 'items' | 'payment'> & { pMethod: 'CASH' | 'CARD' | null; pAt: number | null; pBy: string | null }
 
+// ---------- small caches ----------
+// Only presentation data is cached (menu list, top-10). Prices and totals are ALWAYS read from the database
+// when an item is added or an order is paid, so a stale cache can never produce a wrong order or payment.
+// Every writer of this data calls bumpMenu()/resets topCache, there is no time-based guessing except the daily
+// roll-over of the "last 30 days" window.
+let menuVersion = 1
+let menuCache: { version: number; categories: Category[]; products: Product[] } | null = null
+let topCache: { day: string; products: Product[] } | null = null
+const bumpMenu = (): void => { menuVersion++; menuCache = null; topCache = null }
+
+function activeMenu(): { version: number; categories: Category[]; products: Product[] } {
+  if (!menuCache) {
+    menuCache = {
+      version: menuVersion,
+      categories: all<Category>('SELECT id, name, active FROM categories WHERE active=1 ORDER BY sort, id'),
+      products: all<Product>(`SELECT ${PRODUCT_COLS} FROM products WHERE active=1 ORDER BY sort, name`)
+    }
+  }
+  return menuCache
+}
+
+/** Top 10 products of the last 30 days (paid orders), padded from the menu while there is little history. */
+function topProducts(): Product[] {
+  const day = new Date().toDateString()
+  if (topCache && topCache.day === day) return topCache.products
+  const top = all<Product>(
+    `SELECT p.id, p.category_id AS categoryId, p.name, p.price_cents AS priceCents, p.active
+     FROM products p JOIN order_items i ON i.product_id=p.id JOIN orders o ON o.id=i.order_id
+     WHERE o.status='PAID' AND o.closed_at>=? AND p.active=1
+     GROUP BY p.id ORDER BY SUM(i.qty) DESC, p.name LIMIT 10`, now() - 30 * 864e5)
+  let products = top
+  if (top.length < 10) {
+    const ids = new Set(top.map((p) => p.id))
+    products = [...top, ...activeMenu().products.filter((p) => !ids.has(p.id))].slice(0, 10)
+  }
+  topCache = { day, products }
+  return products
+}
+
+const listTables = (): TableRow[] =>
+  all<TableRow>(`SELECT t.id, t.name, o.id AS orderId, o.opened_at AS openedAt, o.total_cents AS totalCents, o.employee_name AS employeeName
+                 FROM cafe_tables t LEFT JOIN orders o ON o.table_id=t.id AND o.status='OPEN'
+                 WHERE t.active=1 ORDER BY t.sort, t.id`)
+
+const activeEmployees = (): Employee[] =>
+  all<Employee>('SELECT id, name, is_admin AS isAdmin, active, (pin_hash IS NOT NULL) AS hasPin FROM employees WHERE active=1 ORDER BY name')
+
+// ---------- orders ----------
+/** Two statements: order header (+ payment, if any) and its lines. */
 function loadOrder(id: number): Order | null {
-  const o = one<Omit<Order, 'items' | 'payment'>>(`SELECT ${ORDER_COLS} FROM orders WHERE id=?`, id)
-  if (!o) return null
+  const h = one<OrderHead>(
+    `SELECT ${ORDER_COLS}, p.method AS pMethod, p.paid_at AS pAt, p.employee_name AS pBy
+     FROM orders o LEFT JOIN payments p ON p.order_id=o.id WHERE o.id=?`, id)
+  if (!h) return null
   const items = all<OrderItem>(
     'SELECT id, product_id AS productId, name, price_cents AS priceCents, qty, printed_qty AS printedQty FROM order_items WHERE order_id=? ORDER BY id', id)
-  const payment = one<NonNullable<Order['payment']>>(
-    'SELECT method, paid_at AS paidAt, employee_name AS employeeName FROM payments WHERE order_id=?', id) ?? null
-  return { ...o, items, payment }
+  const { pMethod, pAt, pBy, ...o } = h
+  return { ...o, items, payment: pMethod && pAt !== null ? { method: pMethod, paidAt: pAt, employeeName: pBy } : null }
 }
 
 const touch = (orderId: number): void => {
@@ -51,9 +102,8 @@ function logVoid(orderId: number, it: ItemRow, qty: number, employeeId: number):
 /** After items were removed: free the table when the order became empty. */
 function settle(orderId: number): Order | null {
   touch(orderId)
-  const left = one<{ n: number }>('SELECT COUNT(*) n FROM order_items WHERE order_id=?', orderId)!.n
-  if (left > 0) return loadOrder(orderId)
-  if (one('SELECT 1 FROM voids WHERE order_id=?', orderId)) run("UPDATE orders SET status='CANCELLED', closed_at=? WHERE id=?", now(), orderId)
+  if (one('SELECT 1 FROM order_items WHERE order_id=? LIMIT 1', orderId)) return loadOrder(orderId)
+  if (one('SELECT 1 FROM voids WHERE order_id=? LIMIT 1', orderId)) run("UPDATE orders SET status='CANCELLED', closed_at=? WHERE id=?", now(), orderId)
   else run('DELETE FROM orders WHERE id=?', orderId)
   return null
 }
@@ -64,10 +114,13 @@ function dropItem(it: ItemRow, employeeId: number): Order | null {
   return settle(it.order_id)
 }
 
+/** The line and its order's status in one statement. */
 const getItem = (id: number): ItemRow => {
-  const it = one<ItemRow>('SELECT * FROM order_items WHERE id=?', id)
+  const it = one<ItemRow & { status: string }>(
+    `SELECT i.id, i.order_id, i.product_id, i.name, i.price_cents, i.qty, i.printed_qty, o.status
+     FROM order_items i JOIN orders o ON o.id=i.order_id WHERE i.id=?`, id)
   if (!it) throw new Error('Item not found')
-  assertOpen(it.order_id)
+  if (it.status !== 'OPEN') throw new Error('This order is already closed and cannot be changed')
   return it
 }
 
@@ -77,34 +130,46 @@ const start = (d: number): string => {
   return `${p(x.getDate())}/${p(x.getMonth() + 1)}/${x.getFullYear()};${p(x.getHours())}:${p(x.getMinutes())}`
 }
 
-function queryOrders(from: number, to: number): HistoryRow[] {
-  return all<HistoryRow>(
-    `SELECT o.id, o.table_name AS tableName, o.employee_name AS employeeName, p.employee_name AS paidBy,
-            o.closed_at AS closedAt, o.total_cents AS totalCents, p.method
-     FROM orders o JOIN payments p ON p.order_id=o.id
-     WHERE o.status='PAID' AND o.closed_at>=? AND o.closed_at<? ORDER BY o.closed_at DESC LIMIT 2000`, from, to)
-}
+const HISTORY_COLS = `o.id, o.table_name AS tableName, o.employee_name AS employeeName, p.employee_name AS paidBy,
+  o.closed_at AS closedAt, o.total_cents AS totalCents, p.method`
+const HISTORY_SQL = `SELECT ${HISTORY_COLS} FROM orders o JOIN payments p ON p.order_id=o.id
+  WHERE o.status='PAID' AND o.closed_at>=? AND o.closed_at<? ORDER BY o.closed_at DESC LIMIT ?`
+const HISTORY_PAGE = 300 // rows sent to the screen; the full period is still available through CSV export
 
+function queryOrders(from: number, to: number, limit = HISTORY_PAGE): HistoryRow[] {
+  return all<HistoryRow>(HISTORY_SQL, from, to, limit)
+}
+const countOrders = (from: number, to: number): number =>
+  one<{ n: number }>("SELECT COUNT(*) n FROM orders WHERE status='PAID' AND closed_at>=? AND closed_at<?", from, to)!.n
+
+/** Three aggregate statements inside one read transaction, so every number describes the same moment. */
 function report(from: number, to: number): Report {
-  const W = "o.status='PAID' AND o.closed_at>=? AND o.closed_at<?"
-  const t = one<{ n: number; rev: number }>(`SELECT COUNT(*) n, COALESCE(SUM(o.total_cents),0) rev FROM orders o WHERE ${W}`, from, to)!
-  const methods = all<{ method: string; c: number }>(
-    `SELECT p.method, SUM(p.amount_cents) c FROM payments p JOIN orders o ON o.id=p.order_id WHERE ${W} GROUP BY p.method`, from, to)
-  const itemsSold = one<{ q: number }>(
-    `SELECT COALESCE(SUM(i.qty),0) q FROM order_items i JOIN orders o ON o.id=i.order_id WHERE ${W}`, from, to)!.q
-  const top = all<Report['top'][number]>(
-    `SELECT i.name, SUM(i.qty) qty, SUM(i.qty*i.price_cents) cents FROM order_items i JOIN orders o ON o.id=i.order_id
-     WHERE ${W} GROUP BY i.name ORDER BY qty DESC, i.name LIMIT 30`, from, to)
-  const employees = all<Report['employees'][number]>(
-    `SELECT COALESCE(p.employee_name,'-') name, COUNT(*) orders, SUM(p.amount_cents) cents
-     FROM payments p JOIN orders o ON o.id=p.order_id WHERE ${W} GROUP BY p.employee_name ORDER BY cents DESC`, from, to)
-  const v = one<{ n: number; c: number }>(
-    'SELECT COALESCE(SUM(qty),0) n, COALESCE(SUM(qty*price_cents),0) c FROM voids WHERE at>=? AND at<?', from, to)!
-  const by = (m: string): number => methods.find((x) => x.method === m)?.c ?? 0
-  return {
-    orders: t.n, revenue: t.rev, cash: by('CASH'), card: by('CARD'), itemsSold,
-    avg: t.n ? Math.round(t.rev / t.n) : 0, top, employees, voids: { count: v.n, cents: v.c }
-  }
+  return tx(() => {
+    const W = "o.status='PAID' AND o.closed_at>=? AND o.closed_at<?"
+    const pay = all<{ name: string; method: string; n: number; c: number }>(
+      `SELECT COALESCE(p.employee_name,'-') name, p.method, COUNT(*) n, SUM(p.amount_cents) c
+       FROM orders o JOIN payments p ON p.order_id=o.id WHERE ${W} GROUP BY 1, 2`, from, to)
+    const sold = all<{ name: string; qty: number; cents: number }>(
+      `SELECT i.name, SUM(i.qty) qty, SUM(i.qty*i.price_cents) cents
+       FROM order_items i JOIN orders o ON o.id=i.order_id WHERE ${W} GROUP BY i.name ORDER BY qty DESC, i.name`, from, to)
+    const v = one<{ n: number; c: number }>(
+      'SELECT COALESCE(SUM(qty),0) n, COALESCE(SUM(qty*price_cents),0) c FROM voids WHERE at>=? AND at<?', from, to)!
+    // The SQL already grouped everything; these loops only combine a handful of rows (employees x 2 methods, distinct products).
+    let orders = 0, revenue = 0, cash = 0, card = 0
+    const byEmp = new Map<string, { orders: number; cents: number }>()
+    for (const r of pay) {
+      orders += r.n; revenue += r.c
+      if (r.method === 'CASH') cash += r.c; else card += r.c
+      const e = byEmp.get(r.name) ?? { orders: 0, cents: 0 }
+      e.orders += r.n; e.cents += r.c; byEmp.set(r.name, e)
+    }
+    return {
+      orders, revenue, cash, card, itemsSold: sold.reduce((a, r) => a + r.qty, 0), avg: orders ? Math.round(revenue / orders) : 0,
+      top: sold.slice(0, 30),
+      employees: [...byEmp].map(([name, e]) => ({ name, ...e })).sort((a, b) => b.cents - a.cents),
+      voids: { count: v.n, cents: v.c }
+    }
+  })
 }
 
 const startOfToday = (): number => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() }
@@ -143,12 +208,13 @@ const csvCell = (v: string | number): string => {
 
 export const api = {
   // ---------- session ----------
-  login(id: number, pin: string): User {
+  /** Logs in and returns everything the first screen needs, in one round trip. */
+  login(id: number, pin: string): LoginResult {
     int(id, 'employee')
     const given = typeof pin === 'string' ? pin : ''
     checkLock(id)
     const e = one<{ id: number; name: string; pin_hash: string | null; is_admin: number; active: number }>(
-      'SELECT * FROM employees WHERE id=?', id)
+      'SELECT id, name, pin_hash, is_admin, active FROM employees WHERE id=?', id)
     if (!e || !e.active) throw new Error('Employee not found')
     if (e.pin_hash) {
       const v = verifyPin(e.pin_hash, given)
@@ -158,9 +224,12 @@ export const api = {
     clearFails(id)
     const user: User = { id: e.id, name: e.name, isAdmin: e.is_admin }
     setSession(user)
-    return user
+    return { user, tables: listTables() }
   },
   logout(): void { setSession(null) },
+
+  /** Everything the login screen needs, in one call. */
+  getBootData(): BootData { return { settings: getSettings(), employees: activeEmployees() } },
 
   // ---------- employees ----------
   listEmployees(includeInactive = false): Employee[] {
@@ -185,10 +254,7 @@ export const api = {
   },
 
   // ---------- tables ----------
-  listTables: (): TableRow[] =>
-    all<TableRow>(`SELECT t.id, t.name, o.id AS orderId, o.opened_at AS openedAt, o.total_cents AS totalCents, o.employee_name AS employeeName
-                   FROM cafe_tables t LEFT JOIN orders o ON o.table_id=t.id AND o.status='OPEN'
-                   WHERE t.active=1 ORDER BY t.sort, t.id`),
+  listTables,
 
   saveTable(t: { id?: number; name: string }): void {
     const name = text(t.name, 'Table name', 40)
@@ -222,6 +288,7 @@ export const api = {
     const name = text(c.name, 'Category name', 40)
     if (c.id !== undefined) run('UPDATE categories SET name=?, active=? WHERE id=?', name, +!!c.active, int(c.id, 'category'))
     else run('INSERT INTO categories(name, sort) VALUES (?, (SELECT COALESCE(MAX(sort),0)+1 FROM categories))', name)
+    bumpMenu()
   },
 
   listProducts: (includeInactive = false): Product[] =>
@@ -234,26 +301,24 @@ export const api = {
     if (!one('SELECT 1 FROM categories WHERE id=?', cat)) throw new Error('Category not found')
     if (p.id !== undefined) run('UPDATE products SET category_id=?, name=?, price_cents=?, active=? WHERE id=?', cat, name, cents, +!!p.active, int(p.id, 'product'))
     else run('INSERT INTO products(category_id, name, price_cents, active, sort) VALUES (?,?,?,?,(SELECT COALESCE(MAX(sort),0)+1 FROM products))', cat, name, cents, +!!p.active)
-  },
-
-  /** Top 10 products of the last 30 days (paid orders). Padded with other products while there is little history. */
-  mostUsed(): Product[] {
-    const since = now() - 30 * 864e5
-    const top = all<Product>(
-      `SELECT p.id, p.category_id AS categoryId, p.name, p.price_cents AS priceCents, p.active
-       FROM products p JOIN order_items i ON i.product_id=p.id JOIN orders o ON o.id=i.order_id
-       WHERE o.status='PAID' AND o.closed_at>=? AND p.active=1
-       GROUP BY p.id ORDER BY SUM(i.qty) DESC, p.name LIMIT 10`, since)
-    if (top.length >= 10) return top
-    const ids = new Set(top.map((p) => p.id))
-    const rest = all<Product>(`SELECT ${PRODUCT_COLS} FROM products WHERE active=1 ORDER BY sort, name`).filter((p) => !ids.has(p.id))
-    return [...top, ...rest].slice(0, 10)
+    bumpMenu()
   },
 
   // ---------- orders (the acting employee always comes from the session) ----------
   getTableOrder(tableId: number): Order | null {
     const r = one<{ id: number }>("SELECT id FROM orders WHERE table_id=? AND status='OPEN'", int(tableId, 'table'))
     return r ? loadOrder(r.id) : null
+  },
+
+  /**
+   * Everything the order screen needs in ONE call. The menu is only included when the caller's copy is out of date
+   * (knownMenuVersion), so opening a table normally transfers the order and the 10 most used items only.
+   */
+  getTableWorkspace(tableId: number, knownMenuVersion = -1): Workspace {
+    int(tableId, 'table')
+    const m = activeMenu()
+    const r = one<{ id: number }>("SELECT id FROM orders WHERE table_id=? AND status='OPEN'", tableId)
+    return { order: r ? loadOrder(r.id) : null, top: topProducts(), menu: m.version === knownMenuVersion ? null : m }
   },
 
   getOrder(id: number): Order | null {
@@ -264,20 +329,23 @@ export const api = {
 
   /** Adds one unit. Creates the order (table becomes occupied) on the first product. */
   addItem(tableId: number, productId: number): Order | null {
-    const employeeId = me().id
+    const user = me()
     int(tableId, 'table'); int(productId, 'product')
     return tx(() => {
       let orderId = one<{ id: number }>("SELECT id FROM orders WHERE table_id=? AND status='OPEN'", tableId)?.id
+      // product price + the matching line of this order in a single statement
+      const p = one<{ id: number; name: string; price_cents: number; item_id: number | null }>(
+        `SELECT p.id, p.name, p.price_cents,
+                (SELECT i.id FROM order_items i WHERE i.order_id=? AND i.product_id=p.id AND i.price_cents=p.price_cents) AS item_id
+         FROM products p WHERE p.id=? AND p.active=1`, orderId ?? 0, productId)
+      if (!p) throw new Error('Product not available')
       if (!orderId) {
         const t = one<{ name: string }>('SELECT name FROM cafe_tables WHERE id=? AND active=1', tableId)
         if (!t) throw new Error('Table not found')
         orderId = Number(run('INSERT INTO orders(table_id, table_name, employee_id, employee_name, opened_at) VALUES (?,?,?,?,?)',
-          tableId, t.name, employeeId, empName(employeeId), now()).lastInsertRowid)
+          tableId, t.name, user.id, user.name, now()).lastInsertRowid)
       }
-      const p = one<{ id: number; name: string; price_cents: number }>('SELECT * FROM products WHERE id=? AND active=1', productId)
-      if (!p) throw new Error('Product not available')
-      const it = one<{ id: number }>('SELECT id FROM order_items WHERE order_id=? AND product_id=? AND price_cents=?', orderId, p.id, p.price_cents)
-      if (it) run('UPDATE order_items SET qty=qty+1 WHERE id=?', it.id)
+      if (p.item_id) run('UPDATE order_items SET qty=qty+1 WHERE id=?', p.item_id)
       else run('INSERT INTO order_items(order_id, product_id, name, price_cents, qty) VALUES (?,?,?,?,1)', orderId, p.id, p.name, p.price_cents)
       touch(orderId)
       return loadOrder(orderId)
@@ -334,21 +402,26 @@ export const api = {
     })
   },
 
+  /** One atomic step: close the order (total recomputed from its lines) and record the payment. */
   payOrder(orderId: number, method: 'CASH' | 'CARD'): Order {
-    const employeeId = me().id
+    const user = me()
     int(orderId, 'order')
     if (method !== 'CASH' && method !== 'CARD') throw new Error('Choose cash or card')
-    return tx(() => {
-      assertOpen(orderId)
-      if (!one('SELECT 1 FROM order_items WHERE order_id=?', orderId)) throw new Error('The order is empty')
-      touch(orderId)
+    const paid = tx(() => {
       const t = now()
-      run("UPDATE orders SET status='PAID', closed_at=? WHERE id=?", t, orderId)
-      const total = one<{ c: number }>('SELECT total_cents c FROM orders WHERE id=?', orderId)!.c
+      const r = one<{ c: number }>(
+        `UPDATE orders SET status='PAID', closed_at=?,
+                total_cents=(SELECT COALESCE(SUM(qty*price_cents),0) FROM order_items WHERE order_id=?)
+         WHERE id=? AND status='OPEN' AND EXISTS (SELECT 1 FROM order_items WHERE order_id=?)
+         RETURNING total_cents AS c`, t, orderId, orderId, orderId)
+      if (!r) { assertOpen(orderId); throw new Error('The order is empty') }
       run('INSERT INTO payments(order_id, method, amount_cents, paid_at, employee_id, employee_name) VALUES (?,?,?,?,?,?)',
-        orderId, method, total, t, employeeId, empName(employeeId))
+        orderId, method, r.c, t, user.id, user.name)
       return loadOrder(orderId)!
     })
+    topCache = null // a payment changes the "most used" ranking...
+    setImmediate(() => { try { topProducts() } catch { /* database closing */ } }) // ...rebuilt right after this reply is sent, not during the next table open
+    return paid
   },
 
   // ---------- printing ----------
@@ -383,23 +456,30 @@ export const api = {
   },
 
   // ---------- history & reports ----------
-  /** Staff only see today's orders; admins can look at any period. */
-  listOrders(from: number, to: number): HistoryRow[] {
+  /** Newest 300 paid orders of the period plus the real total. Staff only see today. */
+  listOrders(from: number, to: number): HistoryPage {
     int(from, 'date', 0, 9e15); int(to, 'date', 0, 9e15)
-    return queryOrders(me().isAdmin ? from : Math.max(from, startOfToday()), to)
+    const f = me().isAdmin ? from : Math.max(from, startOfToday())
+    return { rows: queryOrders(f, to), total: countOrders(f, to) }
   },
   report(from: number, to: number): Report { return report(int(from, 'date', 0, 9e15), int(to, 'date', 0, 9e15)) },
 
+  /** Streams every order of the period to the file in batches (no giant array in memory). */
   async exportCsv(from: number, to: number): Promise<string | null> {
     int(from, 'date', 0, 9e15); int(to, 'date', 0, 9e15)
-    const lines = [['Order', 'Date', 'Time', 'Table', 'Opened by', 'Paid by', 'Method', 'Total'].join(';')]
-    for (const o of queryOrders(from, to).reverse()) {
-      const [d, t] = start(o.closedAt).split(';')
-      lines.push([o.id, d, t, o.tableName, o.employeeName ?? '', o.paidBy ?? '', o.method, (o.totalCents / 100).toFixed(2)].map(csvCell).join(';'))
-    }
     const r = await saveDlg({ title: 'Export CSV', defaultPath: 'cafe-orders.csv', filters: [{ name: 'CSV', extensions: ['csv'] }] })
     if (r.canceled || !r.filePath) return null
-    writeFileSync(r.filePath, '\ufeff' + lines.join('\r\n'))
+    const fd = openSync(r.filePath, 'w')
+    try {
+      writeSync(fd, '\ufeff' + ['Order', 'Date', 'Time', 'Table', 'Opened by', 'Paid by', 'Method', 'Total'].join(';') + '\r\n')
+      let batch: string[] = []
+      for (const o of prepared(HISTORY_SQL.replace('DESC', 'ASC')).iterate(from, to, -1) as Iterable<HistoryRow>) {
+        const [d, t] = start(o.closedAt).split(';')
+        batch.push([o.id, d, t, o.tableName, o.employeeName ?? '', o.paidBy ?? '', o.method, (o.totalCents / 100).toFixed(2)].map(csvCell).join(';'))
+        if (batch.length >= 1000) { writeSync(fd, batch.join('\r\n') + '\r\n'); batch = [] }
+      }
+      if (batch.length) writeSync(fd, batch.join('\r\n') + '\r\n')
+    } finally { closeSync(fd) }
     return r.filePath
   },
 
@@ -413,6 +493,7 @@ export const api = {
     tx(() => {
       for (const [k, v] of clean) run('INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', k, v)
     })
+    invalidateSettings()
   },
 
   async backupNow(): Promise<string | null> {

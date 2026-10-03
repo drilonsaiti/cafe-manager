@@ -1,6 +1,6 @@
-import { app, BrowserWindow, ipcMain, Menu, session } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, session } from 'electron'
 import { join } from 'node:path'
-import { openDb, scheduleBackups } from './db'
+import { backupDir, idleMaintenance, openDb, scheduleBackups, shutdownDb } from './db'
 import { api } from './api'
 import { authorize, isAppUrl, setSession, validSender } from './security'
 
@@ -12,6 +12,7 @@ function createWindow(): void {
     height: 820,
     minWidth: 1024,
     minHeight: 640,
+    show: false, // shown on ready-to-show: no white flash, no half-painted window
     backgroundColor: '#eef1f4',
     autoHideMenuBar: true,
     webPreferences: {
@@ -24,7 +25,7 @@ function createWindow(): void {
       devTools: !app.isPackaged
     }
   })
-  win.maximize()
+  win.once('ready-to-show', () => { win?.maximize(); win?.show() })
 
   // The UI never opens other windows or navigates away from itself.
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -34,6 +35,16 @@ function createWindow(): void {
 
   if (process.env['ELECTRON_RENDERER_URL']) win.loadURL(process.env['ELECTRON_RENDERER_URL'])
   else win.loadFile(join(__dirname, '../renderer/index.html'))
+}
+
+function registerIpc(): void {
+  for (const [name, fn] of Object.entries(api)) {
+    ipcMain.handle(name, (e, ...args: unknown[]) => {
+      if (!validSender(e)) throw new Error('Blocked request')
+      authorize(name)
+      return (fn as (...a: unknown[]) => unknown)(...args)
+    })
+  }
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -48,16 +59,25 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
     if (app.isPackaged) Menu.setApplicationMenu(null) // no View > Reload / DevTools in production
-    openDb()
-    scheduleBackups()
-    for (const [name, fn] of Object.entries(api)) {
-      ipcMain.handle(name, (e, ...args: unknown[]) => {
-        if (!validSender(e)) throw new Error('Blocked request')
-        authorize(name)
-        return (fn as (...a: unknown[]) => unknown)(...args)
-      })
-    }
+
+    registerIpc()
+    // Start the renderer process first so it boots while the database opens. This is safe: openDb() is
+    // synchronous, so no IPC request can be handled before it has finished.
     createWindow()
+    try {
+      openDb()
+    } catch (e) {
+      dialog.showErrorBox(
+        'Café Manager cannot open its data file',
+        `${(e as Error).message}\n\nYour automatic backups are in:\n${backupDir()}\nRestore one of them, or contact support. Nothing was changed.`
+      )
+      app.exit(1)
+      return
+    }
+    // Non-critical work waits until the first screen is long since usable.
+    setTimeout(idleMaintenance, 20_000)
+    scheduleBackups()
   })
   app.on('window-all-closed', () => app.quit())
+  app.on('will-quit', shutdownDb)
 }

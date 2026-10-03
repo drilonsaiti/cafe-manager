@@ -63,3 +63,11 @@ Admins also see Reports and Settings. Staff see Tables and Orders only, and only
 - **Restore** only accepts an intact file that has exactly this app's tables, with no triggers or views, and saves a safety copy first.
 - Dependencies are current and `npm audit` reports 0 known vulnerabilities (Electron 44, better-sqlite3 13).
 - Build-time hardening: Electron "fuses" disable `ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS` and inspector flags, and only load code from the packaged app.
+
+## Performance notes
+
+- **Database**: statements are prepared once and reused. A new index on `payments(order_id)` is added automatically on first start after the update (schema version 2). It only adds an index, never touches your data; on a database with 270,000 orders it took about 85 ms. Without it, history and reports got dramatically slower as orders accumulated.
+- **Durability**: the database runs with `synchronous=FULL`, so an order change that was acknowledged survives a power cut. If a very slow disk makes taps feel slow, `NORMAL` (in `src/main/db.ts`, function `openDb`) is faster and still cannot corrupt the database in WAL mode, but the last second or so of changes can be lost in a power cut.
+- **Table board** does not poll. It is loaded once after login and each order change updates only its own table. Timers show `1h 24m` and refresh every 20 seconds.
+- **Orders list** shows the newest 300 orders of the chosen period with the real total; Export CSV in Reports always contains everything.
+- The menu is cached on the screen and only re-sent when it was edited. Adding a product and "+" on an order line appear immediately and are confirmed by the database a moment later; paying is never optimistic and always waits for pending changes.

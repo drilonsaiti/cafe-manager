@@ -4,16 +4,16 @@ import { useApp } from '../ctx'
 import { Modal, RangePicker } from '../ui'
 import { bounds, clock, dateStr, money, todayRange } from '../util'
 import type { Range } from '../util'
-import type { HistoryRow, Order } from '../../../shared/types'
+import type { HistoryPage, Order } from '../../../shared/types'
 
 export default function History() {
   const { user, settings, toast } = useApp()
   const [range, setRange] = useState<Range>(todayRange())
-  const [rows, setRows] = useState<HistoryRow[]>([])
+  const [page, setPage] = useState<HistoryPage>({ rows: [], total: 0 })
   const [open, setOpen] = useState<Order | null>(null)
   const cur = settings.currency
 
-  useEffect(() => { const [a, b] = bounds(range); api.listOrders(a, b).then(setRows) }, [range])
+  useEffect(() => { const [a, b] = bounds(range); api.listOrders(a, b).then(setPage) }, [range])
 
   const show = async (id: number): Promise<void> => setOpen(await api.getOrder(id))
   const reprint = async (): Promise<void> => {
@@ -31,15 +31,18 @@ export default function History() {
       <table className="grid-table">
         <thead><tr><th>Order</th><th>Date</th><th>Time</th><th>Table</th><th>Employee</th><th>Method</th><th className="num">Total</th></tr></thead>
         <tbody>
-          {rows.map((r) => (
+          {page.rows.map((r) => (
             <tr key={r.id} className="click" onClick={() => show(r.id)}>
               <td>#{r.id}</td><td>{dateStr(r.closedAt)}</td><td>{clock(r.closedAt)}</td><td>{r.tableName}</td>
               <td>{r.paidBy ?? r.employeeName}</td><td>{r.method === 'CASH' ? 'Cash' : 'Card'}</td><td className="num">{money(r.totalCents, cur)}</td>
             </tr>
           ))}
-          {rows.length === 0 && <tr><td colSpan={7} className="empty">No paid orders in this period.</td></tr>}
+          {page.rows.length === 0 && <tr><td colSpan={7} className="empty">No paid orders in this period.</td></tr>}
         </tbody>
       </table>
+      {page.total > page.rows.length && (
+        <p className="mute more">Showing the latest {page.rows.length} of {page.total} orders. Narrow the dates, or use Export CSV in Reports for everything.</p>
+      )}
       {open && (
         <Modal title={`Order #${open.id} · ${open.tableName}`} onClose={() => setOpen(null)}>
           <p className="mute">{open.closedAt ? `${dateStr(open.closedAt)} ${clock(open.closedAt)}` : ''} · {open.payment?.employeeName ?? open.employeeName} · {open.payment?.method === 'CASH' ? 'Cash' : 'Card'}</p>

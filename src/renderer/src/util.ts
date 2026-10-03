@@ -1,5 +1,3 @@
-import { useEffect, useState } from 'react'
-
 export const money = (cents: number, cur = 'EUR'): string => {
   const v = (cents / 100).toFixed(2)
   return cur === 'EUR' ? `€${v}` : `${v} ${cur}`
@@ -10,16 +8,6 @@ export const msg = (e: unknown): string => (e instanceof Error ? e.message : Str
 const p2 = (n: number): string => String(n).padStart(2, '0')
 export const clock = (ms: number): string => { const d = new Date(ms); return `${p2(d.getHours())}:${p2(d.getMinutes())}` }
 export const dateStr = (ms: number): string => { const d = new Date(ms); return `${p2(d.getDate())}/${p2(d.getMonth() + 1)}/${d.getFullYear()}` }
-export const duration = (ms: number): string => {
-  const s = Math.max(0, Math.floor(ms / 1000))
-  return `${p2(Math.floor(s / 3600))}:${p2(Math.floor((s % 3600) / 60))}:${p2(s % 60)}`
-}
-
-export function useNow(ms = 1000): number {
-  const [n, setN] = useState(Date.now())
-  useEffect(() => { const i = setInterval(() => setN(Date.now()), ms); return () => clearInterval(i) }, [ms])
-  return n
-}
 
 // ----- date ranges (weeks start on Monday) -----
 export type RangeKind = 'today' | 'yesterday' | 'week' | 'month' | 'custom'

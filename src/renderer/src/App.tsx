@@ -1,16 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from './api'
 import { AppCtx } from './ctx'
 import type { Ctx } from './ctx'
 import { IconSwitch } from './icons'
 import { initials } from './util'
-import type { Settings, TableRow, User } from '../../shared/types'
+import { patchTable, setTables } from './tablesStore'
+import type { Employee, LoginResult, Settings, TableRow, User } from '../../shared/types'
 import Login from './screens/Login'
 import Tables from './screens/Tables'
 import OrderScreen from './screens/Order'
 import History from './screens/History'
-import Reports from './screens/Reports'
-import Admin from './screens/Admin'
+// Rarely used, admin-only screens are loaded the first time they are opened.
+const Reports = lazy(() => import('./screens/Reports'))
+const Admin = lazy(() => import('./screens/Admin'))
 
 type Screen = 'tables' | 'order' | 'history' | 'reports' | 'admin'
 
@@ -19,10 +21,19 @@ export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [screen, setScreen] = useState<Screen>('tables')
   const [table, setTable] = useState<TableRow | null>(null)
+  const [employees, setEmployees] = useState<Employee[]>([])
   const [note, setNote] = useState<{ m: string; kind: string } | null>(null)
 
+  const boot = useCallback(async () => {
+    const b = await api.getBootData() // settings + employees: one round trip
+    setSettings(b.settings); setEmployees(b.employees)
+  }, [])
+  useEffect(() => { boot() }, [boot])
   const reloadSettings = useCallback(async () => setSettings(await api.getSettings()), [])
-  useEffect(() => { reloadSettings() }, [reloadSettings])
+  const reloadTables = useCallback(async () => setTables(await api.listTables()), [])
+
+  const openTable = useCallback((t: TableRow) => { setTable(t); setScreen('order') }, [])
+  const backToTables = useCallback((reload?: boolean) => { setScreen('tables'); if (reload) reloadTables() }, [reloadTables])
 
   const toast = useCallback((m: string, kind: 'ok' | 'err' = 'ok') => {
     setNote({ m, kind })
@@ -30,14 +41,18 @@ export default function App() {
   }, [])
 
   const ctx = useMemo<Ctx | null>(
-    () => (user && settings ? { user, settings, toast, reloadSettings } : null),
-    [user, settings, toast, reloadSettings]
+    () => (user && settings ? { user, settings, toast, reloadSettings, reloadTables } : null),
+    [user, settings, toast, reloadSettings, reloadTables]
   )
 
   if (!settings) return null
-  if (!user || !ctx) return <Login cafe={settings.cafeName} onLogin={(u) => { setUser(u); setScreen('tables') }} />
+  if (!user || !ctx) return <Login cafe={settings.cafeName} emps={employees} onLogin={(r: LoginResult) => { setUser(r.user); setTables(r.tables); setScreen('tables') }} />
 
-  const logout = (): void => { api.logout().finally(() => setUser(null)) }
+  const logout = async (): Promise<void> => {
+    await api.logout()
+    await boot() // employees or settings may have been edited during the shift
+    setUser(null)
+  }
   const tabs: [Screen, string, boolean][] = [
     ['tables', 'Tables', true], ['history', 'Orders', true], ['reports', 'Reports', !!user.isAdmin], ['admin', 'Settings', !!user.isAdmin]
   ]
@@ -58,11 +73,13 @@ export default function App() {
           <button className="btn sm" onClick={logout}><IconSwitch size={18} />Switch employee</button>
         </nav>
         <main className={'main' + (screen === 'order' ? ' fill' : '')}>
-          {screen === 'tables' && <Tables onOpen={(t) => { setTable(t); setScreen('order') }} />}
-          {screen === 'order' && table && <OrderScreen table={table} onBack={() => setScreen('tables')} />}
+          {screen === 'tables' && <Tables onOpen={openTable} />}
+          {screen === 'order' && table && <OrderScreen table={table} onBack={backToTables} onOrder={patchTable} />}
           {screen === 'history' && <History />}
-          {screen === 'reports' && user.isAdmin ? <Reports /> : null}
-          {screen === 'admin' && user.isAdmin ? <Admin /> : null}
+          <Suspense fallback={null}>
+            {screen === 'reports' && user.isAdmin ? <Reports /> : null}
+            {screen === 'admin' && user.isAdmin ? <Admin /> : null}
+          </Suspense>
         </main>
         {note && <div className={'toast ' + note.kind} role="status">{note.m}</div>}
       </div>

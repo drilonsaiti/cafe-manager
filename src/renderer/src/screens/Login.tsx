@@ -2,16 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { IconLock } from '../icons'
 import { initials, msg } from '../util'
-import type { Employee, User } from '../../../shared/types'
+import type { Employee, LoginResult } from '../../../shared/types'
 
-export default function Login({ cafe, onLogin }: { cafe: string; onLogin: (u: User) => void }) {
-  const [emps, setEmps] = useState<Employee[]>([])
+export default function Login({ cafe, emps, onLogin }: { cafe: string; emps: Employee[]; onLogin: (r: LoginResult) => void }) {
   const [pick, setPick] = useState<Employee | null>(null)
   const [pin, setPin] = useState('')
   const [err, setErr] = useState('')
   const go = useRef<() => void>(() => {})
-
-  useEffect(() => { api.listEmployees().then(setEmps) }, [])
 
   const submit = async (e: Employee, p: string): Promise<void> => {
     try { onLogin(await api.login(e.id, p)) } catch (x) { setErr(msg(x)); setPin('') }

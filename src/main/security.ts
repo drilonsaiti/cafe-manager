@@ -17,7 +17,7 @@ export const adminUser = (): User => {
 }
 
 /** Callable without logging in (login screen needs these). */
-const PUBLIC = new Set(['listEmployees', 'login', 'getSettings'])
+const PUBLIC = new Set(['listEmployees', 'login', 'getSettings', 'getBootData'])
 /** Callable by admins only. Everything else needs any logged-in employee. */
 const ADMIN = new Set([
   'saveEmployee', 'saveTable', 'moveTable', 'deleteTable', 'saveCategory', 'saveProduct',

@@ -34,12 +34,13 @@ function useAct(reload: () => unknown) {
 }
 
 function TablesAdmin() {
+  const { reloadTables } = useApp()
   const [rows, setRows] = useState<TableRow[]>([])
   const [name, setName] = useState('')
   const [del, setDel] = useState<TableRow | null>(null)
   const load = async (): Promise<void> => setRows(await api.listTables())
   useEffect(() => { load() }, [])
-  const act = useAct(load)
+  const act = useAct(async () => { await load(); await reloadTables() })
 
   return (
     <div className="card">
