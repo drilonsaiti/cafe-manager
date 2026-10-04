@@ -8,8 +8,17 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "noEmit": true,
-    "types": ["node"],
-    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+    "types": [
+      "node"
+    ],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ]
   },
-  "include": ["src", "electron.vite.config.ts"]
+  "include": [
+    "src",
+    "electron.vite.config.ts"
+  ]
 }

@@ -3,6 +3,7 @@ productName: Cafe Manager
 npmRebuild: false   # better-sqlite3 13 ships ready-made Windows binaries
 directories:
   output: release
+  buildResources: build
 files:
   - out/**
   - package.json
@@ -14,10 +15,14 @@ files:
 asarUnpack:
   - "**/*.node"
 win:
+  icon: build/icon.ico
   target:
     - target: nsis
-      arch: [x64]
+      arch: [ x64 ]
 nsis:
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
