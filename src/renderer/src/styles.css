@@ -23,6 +23,31 @@
     --pop: 0 10px 28px rgba(15, 22, 32, .2)
 }
 
+html[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #11161d;
+    --surface: #1b232d;
+    --ink: #edf2f7;
+    --ink2: #c4ced9;
+    --mute: #96a4b4;
+    --line: #303b48;
+    --line2: #435162;
+    --accent: #829bff;
+    --accent-soft: #293654;
+    --free: #52c794;
+    --free-bg: #1b342b;
+    --free-line: #315b47;
+    --busy: #ff7777;
+    --busy-bg: #3a2529;
+    --busy-line: #66383e;
+    --amber: #edbd55;
+    --amber-bg: #3a3120;
+    --amber-line: #64512c;
+    --pop: 0 10px 28px rgba(0, 0, 0, .5)
+}
+
+html[data-theme="dark"] body { color-scheme: dark }
+
 * {
     box-sizing: border-box
 }
@@ -1115,14 +1140,15 @@ input.off {
 
 .split {
     display: grid;
-    grid-template-columns:minmax(600px, 740px) 1fr;
+    grid-template-columns:minmax(0, 740px) minmax(0, 1fr);
     gap: 14px;
     height: 100%
 }
 
 .split-tables {
     overflow: auto;
-    padding-right: 2px
+    padding-right: 2px;
+    min-width: 0
 }
 
 .split-tables .pagehead {
@@ -1131,8 +1157,103 @@ input.off {
 
 .split-order {
     min-width: 0;
-    min-height: 0
+    min-height: 0;
+    overflow: hidden
 }
+
+.order-preview {
+    display: grid;
+    grid-template-columns:minmax(300px, 380px) 1fr;
+    gap: 14px;
+    height: 100%;
+    min-width: 0
+}
+
+.preview-ticket > header {
+    min-height: 62px
+}
+
+.preview-ticket .empty {
+    flex: 1;
+    display: grid;
+    place-items: center
+}
+
+.preview-menu {
+    align-items: stretch;
+    padding: 18px
+}
+
+.preview-products {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap
+}
+
+.preview-products > div {
+    width: clamp(110px, 22%, 170px);
+    min-height: 68px;
+    border: 1px solid var(--amber-line);
+    border-radius: 16px;
+    background: var(--amber-bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px
+}
+
+.preview-products span,
+.preview-products small {
+    display: block;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--amber-line)
+}
+
+.preview-products span { width: 54% }
+.preview-products small { width: 32%; height: 5px; opacity: .75 }
+
+@media (max-width: 1050px) {
+    .order-preview { grid-template-columns:minmax(260px, 38%) 1fr }
+}
+
+html[data-theme="dark"] .avatar {
+    background: #2b3850;
+    color: #f1f4ff
+}
+
+html[data-theme="dark"] .segmented { background: #141b23 }
+html[data-theme="dark"] .seg.on { background: #2b3541 }
+html[data-theme="dark"] .btn:hover { background: #27313d }
+html[data-theme="dark"] .btn.primary,
+html[data-theme="dark"] .btn.primary:hover { background: #465fca; border-color: #465fca; color: #fff }
+html[data-theme="dark"] .btn.danger { background: var(--surface); color: var(--busy); border-color: var(--busy-line) }
+html[data-theme="dark"] .icon-btn:hover { background: #2a3440 }
+html[data-theme="dark"] .stepper { background: #2a3440 }
+html[data-theme="dark"] .stepper button:active { background: #435162 }
+html[data-theme="dark"] .prod { background: #252f3a; border-color: var(--line); color: var(--ink) }
+html[data-theme="dark"] .prod:hover { background: #303d4a }
+html[data-theme="dark"] .prod.hot { background: var(--amber-bg); border-color: var(--amber-line) }
+html[data-theme="dark"] .prod:active { background: #465fca; border-color: #465fca; color: #fff }
+html[data-theme="dark"] .prod:active small { color: #e0e7ff }
+html[data-theme="dark"] .bill,
+html[data-theme="dark"] .timeline div { background: #222c37 }
+html[data-theme="dark"] .stat.hero { background: #10151b; border-color: #10151b; color: #fff }
+html[data-theme="dark"] .stat.hero span { color: #aab5c3 }
+html[data-theme="dark"] .toast { background: #e5ebf2; color: #111820 }
+html[data-theme="dark"] .toast.err { background: #a92f39; color: #fff }
+html[data-theme="dark"] input,
+html[data-theme="dark"] select { background-color: var(--surface); color: var(--ink); border-color: var(--line2) }
+html[data-theme="dark"] .range input,
+html[data-theme="dark"] .rowline input:not([type=checkbox]),
+html[data-theme="dark"] .rowline select,
+html[data-theme="dark"] .field input,
+html[data-theme="dark"] .field select { background: #222c37 }
+html[data-theme="dark"] .login { background: var(--bg) }
+html[data-theme="dark"] .notice { color: #f3d487 }
+html[data-theme="dark"] .new { color: #edc66d }
+html[data-theme="dark"] .placeholder { background: var(--surface) }
 
 .placeholder {
     display: grid;

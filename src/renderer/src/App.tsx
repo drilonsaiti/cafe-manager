@@ -1,10 +1,10 @@
 import {lazy, Suspense, useCallback, useEffect, useMemo, useState} from 'react'
 import {api} from './api'
 import type {Ctx} from './ctx'
-import {AppCtx} from './ctx'
+import {AppCtx, useApp} from './ctx'
 import {IconSwitch} from './icons'
-import {errorText, LangCtx, normalizeLang, setLang, translate} from './i18n'
-import {initials} from './util'
+import {errorText, LangCtx, normalizeLang, setLang, translate, useT} from './i18n'
+import {initials, money} from './util'
 import {patchTable, setTables} from './tablesStore'
 import type {Employee, LoginResult, Settings, TableRef, TableRow, User} from '../../shared/types'
 import Login from './screens/Login'
@@ -17,11 +17,33 @@ const Admin = lazy(() => import('./screens/Admin'))
 
 type Screen = 'tables' | 'order' | 'history' | 'reports' | 'admin'
 
+function OrderEmptyPreview() {
+    const {settings} = useApp()
+    const t = useT()
+    return <div className="order-preview" aria-label={t('selectTable')}>
+        <section className="ticket preview-ticket">
+            <header><h2>{t('orders')}</h2></header>
+            <div className="empty">{t('selectTable')}</div>
+            <footer>
+                <div className="total"><span>{t('total')}</span><b>{money(0, settings.currency)}</b></div>
+                <button className="btn primary big" disabled>{t('requestPayment')}</button>
+            </footer>
+        </section>
+        <section className="menu preview-menu">
+            <h4>{t('mostUsed')}</h4>
+            <div className="preview-products" aria-hidden="true">
+                <div><span/><small/></div><div><span/><small/></div><div><span/><small/></div>
+            </div>
+        </section>
+    </div>
+}
+
 export default function App() {
     const [user, setUser] = useState<User | null>(null)
     const [settings, setSettings] = useState<Settings | null>(null)
     const [screen, setScreen] = useState<Screen>('tables')
     const [table, setTable] = useState<TableRef | null>(null)
+    const [darkMode, setDarkMode] = useState(() => localStorage.getItem('cafe-manager-theme') === 'dark')
     const [employees, setEmployees] = useState<Employee[]>([])
     const [note, setNote] = useState<{ m: string; kind: string } | null>(null)
 
@@ -33,6 +55,10 @@ export default function App() {
     useEffect(() => {
         boot()
     }, [boot])
+    useEffect(() => {
+        document.documentElement.dataset.theme = darkMode ? 'dark' : 'light'
+        localStorage.setItem('cafe-manager-theme', darkMode ? 'dark' : 'light')
+    }, [darkMode])
     const reloadSettings = useCallback(async () => setSettings(await api.getSettings()), [])
     const reloadTables = useCallback(async () => setTables(await api.listTables()), [])
 
@@ -53,12 +79,24 @@ export default function App() {
     const split = settings?.layout === 'split'
     /** Opening a table: classic layout goes to the order page, the one-page layout just fills its right-hand side. */
     const openTable = useCallback((t: TableRow) => {
+        if (split && table?.id === t.id) {
+            setTable(null)
+            return
+        }
         setTable({id: t.id, name: t.name});
         if (!split) setScreen('order')
-    }, [split])
+    }, [split, table?.id])
     const closeOrder = useCallback(() => {
         if (split) setTable(null); else setScreen('tables')
     }, [split])
+    useEffect(() => {
+        if (!split || !table) return
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape' && !document.querySelector('.overlay')) setTable(null)
+        }
+        window.addEventListener('keydown', onKeyDown)
+        return () => window.removeEventListener('keydown', onKeyDown)
+    }, [split, table?.id])
     const moved = useCallback((t: TableRef) => {
         reloadTables();
         if (split) setTable(t); else setScreen('tables')
@@ -104,19 +142,24 @@ export default function App() {
                         </div>
                         <div className="spacer"/>
                         <div className="who"><span className="avatar sm">{initials(user.name)}</span>{user.name}</div>
+                        <button className="btn sm theme-toggle" onClick={() => setDarkMode((value) => !value)}>
+                            {darkMode ? t('lightMode') : t('darkMode')}
+                        </button>
                         <button className="btn sm" onClick={logout}><IconSwitch size={18}/>{t('switchEmployee')}
                         </button>
                     </nav>
                     <main className={'main' + (onTables && (split || screen === 'order') ? ' fill' : '')}>
                         {onTables && split && (
                             <div className="split">
-                                <div className="split-tables"><Tables compact selectedId={table?.id ?? null}
+                                <div className="split-tables" onClick={(event) => {
+                                    if (!(event.target as HTMLElement).closest('.tile')) setTable(null)
+                                }}><Tables compact selectedId={table?.id ?? null}
                                                                       onOpen={openTable}/></div>
                                 <div className="split-order">
                                     {table
                                         ? <OrderScreen key={table.id} table={table} mode="pane" onBack={closeOrder}
                                                        onMoved={moved} onOrder={patchTable}/>
-                                        : <div className="placeholder">{t('selectTable')}</div>}
+                                        : <OrderEmptyPreview/>}
                                 </div>
                             </div>
                         )}
