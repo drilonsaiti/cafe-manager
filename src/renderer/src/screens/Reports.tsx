@@ -14,10 +14,14 @@ export default function Reports() {
     const [range, setRange] = useState<Range>(todayRange())
     const [r, setR] = useState<Report | null>(null)
     const [sort, setSort] = useState<'qty' | 'profit'>('qty')
+    const [productPage, setProductPage] = useState(0)
+    const [inventoryPage, setInventoryPage] = useState(0)
     const cur = settings.currency
     const [from, to] = bounds(range)
 
     useEffect(() => {
+        setProductPage(0)
+        setInventoryPage(0)
         api.report(from, to).then(setR)
     }, [from, to])
 
@@ -42,7 +46,10 @@ export default function Reports() {
         [t('cash'), money(r.cash, cur)],
         ...(settings.cardEnabled === '1' || r.card > 0 ? [[t('card'), money(r.card, cur)] as [string, string]] : [])
     ] : []
-    const top = r ? [...r.top].sort((a, b) => (sort === 'qty' ? b.qty - a.qty : b.profit - a.profit)).slice(0, 30) : []
+    const pageSize = 20
+    const sortedTop = r ? [...r.top].sort((a, b) => (sort === 'qty' ? b.qty - a.qty : b.profit - a.profit)) : []
+    const top = sortedTop.slice(productPage * pageSize, (productPage + 1) * pageSize)
+    const inventory = r?.inventory.slice(inventoryPage * pageSize, (inventoryPage + 1) * pageSize) ?? []
 
     return (
         <>
@@ -68,9 +75,9 @@ export default function Reports() {
                                 <h4>{t('topProducts')}</h4>
                                 <div className="segmented noprint">
                                     <button className={'seg' + (sort === 'qty' ? ' on' : '')}
-                                            onClick={() => setSort('qty')}>{t('sortSold')}</button>
+                                            onClick={() => { setSort('qty'); setProductPage(0) }}>{t('sortSold')}</button>
                                     <button className={'seg' + (sort === 'profit' ? ' on' : '')}
-                                            onClick={() => setSort('profit')}>{t('sortProfit')}</button>
+                                            onClick={() => { setSort('profit'); setProductPage(0) }}>{t('sortProfit')}</button>
                                 </div>
                             </div>
                             <table className="grid-table">
@@ -89,11 +96,12 @@ export default function Reports() {
                                     <td className="num">{money(p.cents, cur)}</td>
                                     <td className="num">{money(p.profit, cur)}</td>
                                 </tr>)}
-                                {top.length === 0 && <tr>
+                                {sortedTop.length === 0 && <tr>
                                     <td colSpan={4} className="empty">{t('noSales')}</td>
                                 </tr>}
                                 </tbody>
                             </table>
+                            <Pager page={productPage} total={sortedTop.length} pageSize={pageSize} onChange={setProductPage}/>
                         </div>
                         <div>
                             <h4>{t('employees')}</h4>
@@ -122,8 +130,33 @@ export default function Reports() {
                             })}</p>
                         </div>
                     </div>
+                    <section>
+                        <h4>{t('inventory')}</h4>
+                        <table className="grid-table">
+                            <thead><tr><th>{t('product')}</th><th className="num">{t('quantity')}</th></tr></thead>
+                            <tbody>{inventory.map((p) => <tr key={p.name}><td>{p.name}</td><td className="num">{p.quantity}</td></tr>)}
+                            {r.inventory.length === 0 && <tr><td colSpan={2} className="empty">{t('noProducts')}</td></tr>}</tbody>
+                        </table>
+                        <Pager page={inventoryPage} total={r.inventory.length} pageSize={pageSize} onChange={setInventoryPage}/>
+                    </section>
                 </>
             )}
         </>
     )
+}
+
+function Pager({page, total, pageSize, onChange}: { page: number; total: number; pageSize: number; onChange: (p: number) => void }) {
+    const t = useT()
+    const pages = Math.ceil(total / pageSize)
+    if (pages <= 1) return null
+    const first = page * pageSize + 1
+    const last = Math.min((page + 1) * pageSize, total)
+    return <div className="toolbar noprint" style={{justifyContent: 'space-between', marginTop: 8}}>
+        <span className="mute">{t('pageRange', {first, last, total})}</span>
+        <div className="toolbar">
+            <button className="btn sm" disabled={page === 0} onClick={() => onChange(page - 1)}>{t('previous')}</button>
+            <span className="mute">{t('pageOf', {page: page + 1, pages})}</span>
+            <button className="btn sm" disabled={page + 1 >= pages} onClick={() => onChange(page + 1)}>{t('next')}</button>
+        </div>
+    </div>
 }

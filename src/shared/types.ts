@@ -32,7 +32,8 @@ export interface Product {
 
 /** Admin only (Settings -> Menu). */
 export interface AdminProduct extends Product {
-    costCents: number
+    costCents: number;
+    quantity: number
 }
 
 export interface TableRow {
@@ -103,6 +104,7 @@ export interface Report {
     uncosted: number
     top: { name: string; qty: number; cents: number; profit: number }[]
     employees: { name: string; orders: number; cents: number }[]
+    inventory: { name: string; quantity: number }[]
     voids: { count: number; cents: number }
 }
 

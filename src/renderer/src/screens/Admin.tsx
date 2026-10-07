@@ -105,6 +105,7 @@ function MenuAdmin() {
     const [pn, setPn] = useState('')
     const [pb, setPb] = useState('')
     const [pp, setPp] = useState('')
+    const [pq, setPq] = useState('10')
     const [delCat, setDelCat] = useState<Category | null>(null)
     const [delProd, setDelProd] = useState<AdminProduct | null>(null)
     const load = async (): Promise<void> => {
@@ -156,7 +157,7 @@ function MenuAdmin() {
                 <h3>{t('products')}</h3>
                 <div className="rowline headrow">
                     <span className="grow"/><span className="price">{t('buyPrice')}</span><span
-                    className="price">{t('sellPrice')}</span><span className="catcol">{t('categoryCol')}</span><span
+                    className="price">{t('sellPrice')}</span><span className="price">{t('quantity')}</span><span className="catcol">{t('categoryCol')}</span><span
                     className="oncol">{t('onCol')}</span><span className="iconcol"/>
                 </div>
                 {prods.filter((p) => p.categoryId === sel).map((p) => (
@@ -168,17 +169,20 @@ function MenuAdmin() {
                         <input placeholder={t('newProduct')} value={pn} onChange={(e) => setPn(e.target.value)}/>
                         <input className="price" placeholder="0.60" value={pb} onChange={(e) => setPb(e.target.value)}/>
                         <input className="price" placeholder="1.50" value={pp} onChange={(e) => setPp(e.target.value)}/>
+                        <input className="price" aria-label={t('quantity')} type="number" value={pq} onChange={(e) => setPq(e.target.value)}/>
                         <button className="btn sm primary" onClick={async () => {
                             if (await act(() => api.saveProduct({
                                 categoryId: sel,
                                 name: pn,
                                 priceCents: toCents(pp),
                                 costCents: centsOrZero(pb),
+                                quantity: Number(pq),
                                 active: true
                             }))) {
                                 setPn('');
                                 setPb('');
-                                setPp('')
+                                setPp('');
+                                setPq('10')
                             }
                         }}>{t('add')}</button>
                     </div>
@@ -214,6 +218,7 @@ function ProductRow({p, cats, act, onDelete}: {
     const [name, setName] = useState(p.name)
     const [cost, setCost] = useState((p.costCents / 100).toFixed(2))
     const [price, setPrice] = useState((p.priceCents / 100).toFixed(2))
+    const [quantity, setQuantity] = useState(String(p.quantity))
     const save = (over: { categoryId?: number; active?: boolean } = {}): void => {
         act(() => api.saveProduct({
             id: p.id,
@@ -221,10 +226,11 @@ function ProductRow({p, cats, act, onDelete}: {
             name,
             priceCents: toCents(price),
             costCents: centsOrZero(cost),
+            quantity: Number(quantity),
             active: over.active ?? !!p.active
         }))
     }
-    const dirty = name.trim() !== p.name || toCents(price) !== p.priceCents || centsOrZero(cost) !== p.costCents
+    const dirty = name.trim() !== p.name || toCents(price) !== p.priceCents || centsOrZero(cost) !== p.costCents || Number(quantity) !== p.quantity
     return (
         <div className="rowline">
             <input className={p.active ? '' : 'off'} value={name} onChange={(e) => setName(e.target.value)}
@@ -233,6 +239,8 @@ function ProductRow({p, cats, act, onDelete}: {
                    onBlur={() => dirty && save()}/>
             <input className="price" aria-label={t('sellPrice')} value={price}
                    onChange={(e) => setPrice(e.target.value)} onBlur={() => dirty && save()}/>
+            <input className="price" aria-label={t('quantity')} type="number" step="1" value={quantity}
+                   onChange={(e) => setQuantity(e.target.value)} onBlur={() => dirty && save()}/>
             <select className="catcol" value={p.categoryId}
                     onChange={(e) => save({categoryId: Number(e.target.value)})}>
                 {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}

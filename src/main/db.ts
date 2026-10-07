@@ -265,7 +265,7 @@ function seed(): void {
     })
 }
 
-const SCHEMA_VERSION = 3
+const SCHEMA_VERSION = 4
 
 /** Safe to run on every start and on existing data: only adds what is missing, never changes or removes rows. */
 function migrate(): void {
@@ -284,6 +284,15 @@ function migrate(): void {
             if (!has('order_items', 'cost_cents')) db.exec('ALTER TABLE order_items ADD COLUMN cost_cents INTEGER NOT NULL DEFAULT 0')
             if (!has('order_items', 'added_at')) db.exec('ALTER TABLE order_items ADD COLUMN added_at INTEGER NOT NULL DEFAULT 0')
         })()
+    }
+    if (v < 4) {
+        db.exec('ALTER TABLE products ADD COLUMN quantity INTEGER NOT NULL DEFAULT 10')
+        // Existing open orders predate stock reservation. Reserve their quantities once on upgrade.
+        db.exec(`UPDATE products
+                 SET quantity = quantity - COALESCE((SELECT SUM(i.qty)
+                                                     FROM order_items i
+                                                              JOIN orders o ON o.id = i.order_id
+                                                     WHERE i.product_id = products.id AND o.status = 'OPEN'), 0)`)
     }
     if (v < SCHEMA_VERSION) db.pragma(`user_version = ${SCHEMA_VERSION}`)
 }

@@ -57,7 +57,7 @@ const msgDlg = (o: MessageBoxOptions) => {
 }
 
 const PRODUCT_COLS = 'id, category_id AS categoryId, name, price_cents AS priceCents, active'
-const ADMIN_PRODUCT_COLS = `${PRODUCT_COLS}, cost_cents AS costCents`
+const ADMIN_PRODUCT_COLS = `${PRODUCT_COLS}, cost_cents AS costCents, quantity`
 const ORDER_COLS = `o.id, o.table_id AS tableId, o.table_name AS tableName, o.employee_id AS employeeId,
   o.employee_name AS employeeName, o.status, o.opened_at AS openedAt, o.closed_at AS closedAt, o.total_cents AS totalCents`
 
@@ -188,6 +188,7 @@ function settle(orderId: number): Order | null {
 }
 
 function dropItem(it: ItemRow, employeeId: number): Order | null {
+    if (it.product_id !== null) run('UPDATE products SET quantity=quantity+? WHERE id=?', it.qty, it.product_id)
     if (settled(it)) logVoid(it.order_id, it, it.qty, employeeId)
     run('DELETE FROM order_items WHERE id=?', it.id)
     return settle(it.order_id)
@@ -284,9 +285,10 @@ function report(from: number, to: number): Report {
             orders, revenue, cost, profit: revenue - cost, cash, card,
             itemsSold: sold.reduce((a, r) => a + r.qty, 0), avg: orders ? Math.round(revenue / orders) : 0,
             avgDurationMs: Math.round(dur), uncosted: sold.reduce((a, r) => a + r.nocost, 0),
-            top: sold.slice(0, 100).map((r) => ({name: r.name, qty: r.qty, cents: r.cents, profit: r.cents - r.cost})),
+            top: sold.map((r) => ({name: r.name, qty: r.qty, cents: r.cents, profit: r.cents - r.cost})),
             employees: [...byEmp].map(([name, e]) => ({name, ...e})).sort((a, b) => b.cents - a.cents),
-            voids: {count: v.n, cents: v.c}
+            voids: {count: v.n, cents: v.c},
+            inventory: all<{ name: string; quantity: number }>('SELECT name, quantity FROM products ORDER BY sort, name')
         }
     })
 }
@@ -456,15 +458,17 @@ export const api = {
         name: string;
         priceCents: number;
         costCents: number;
+        quantity?: number;
         active: boolean
     }): void {
         const name = text(p.name, 'Product name', 60)
         const cents = int(p.priceCents, 'sell price (enter something like 1.50)', 0, 10_000_000)
         const cost = int(p.costCents, 'buy price (enter something like 0.60)', 0, 10_000_000)
+        const quantity = p.quantity === undefined ? 10 : int(p.quantity, 'quantity', -1_000_000_000, 1_000_000_000)
         const cat = int(p.categoryId, 'category')
         if (!one('SELECT 1 FROM categories WHERE id=?', cat)) throw new Error('Category not found')
-        if (p.id !== undefined) run('UPDATE products SET category_id=?, name=?, price_cents=?, cost_cents=?, active=? WHERE id=?', cat, name, cents, cost, +!!p.active, int(p.id, 'product'))
-        else run('INSERT INTO products(category_id, name, price_cents, cost_cents, active, sort) VALUES (?,?,?,?,?,(SELECT COALESCE(MAX(sort),0)+1 FROM products))', cat, name, cents, cost, +!!p.active)
+        if (p.id !== undefined) run('UPDATE products SET category_id=?, name=?, price_cents=?, cost_cents=?, quantity=?, active=? WHERE id=?', cat, name, cents, cost, quantity, +!!p.active, int(p.id, 'product'))
+        else run('INSERT INTO products(category_id, name, price_cents, cost_cents, quantity, active, sort) VALUES (?,?,?,?,?,?,(SELECT COALESCE(MAX(sort),0)+1 FROM products))', cat, name, cents, cost, quantity, +!!p.active)
         bumpMenu()
     },
 
@@ -524,12 +528,14 @@ export const api = {
                 name: string;
                 price_cents: number;
                 cost_cents: number;
+                quantity: number;
                 item_id: number | null
             }>(
                 `SELECT p.id,
                         p.name,
                         p.price_cents,
                         p.cost_cents,
+                        p.quantity,
                         (SELECT i.id
                          FROM order_items i
                          WHERE i.order_id = ?
@@ -539,6 +545,8 @@ export const api = {
                  WHERE p.id = ?
                    AND p.active = 1`, orderId ?? 0, productId)
             if (!p) throw new Error('Product not available')
+            if (p.quantity <= 0) throw new Error('Product out of stock')
+            run('UPDATE products SET quantity=quantity-1 WHERE id=?', p.id)
             if (!orderId) {
                 const t = one<{ name: string }>('SELECT name FROM cafe_tables WHERE id=? AND active=1', tableId)
                 if (!t) throw new Error('Table not found')
@@ -562,6 +570,7 @@ export const api = {
             const it = getItem(itemId)
             const nq = it.qty + delta
             if (nq <= 0) return dropItem(it, employeeId)
+            if (it.product_id !== null) run('UPDATE products SET quantity=quantity-? WHERE id=?', delta, it.product_id)
             if (delta < 0 && settled(it)) logVoid(it.order_id, it, 1, employeeId)
             run('UPDATE order_items SET qty=? WHERE id=?', nq, itemId)
             touch(it.order_id)
