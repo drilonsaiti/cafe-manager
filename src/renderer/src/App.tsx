@@ -102,6 +102,31 @@ export default function App() {
         if (split) setTable(t); else setScreen('tables')
     }, [split, reloadTables])
 
+    useEffect(() => {
+        if (!user || settings?.keyboardShortcuts !== '1') return
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.altKey && event.key === 'Enter') {
+                const target = event.target as HTMLElement
+                if (target.closest('input, textarea, select, [contenteditable="true"]') || document.querySelector('.overlay')) return
+                const pay = document.querySelector<HTMLButtonElement>('.order footer button:not(:disabled)')
+                if (pay) { event.preventDefault(); pay.click() }
+                return
+            }
+            if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
+            const target = event.target as HTMLElement
+            if (target.closest('input, textarea, select, [contenteditable="true"]') || document.querySelector('.overlay')) return
+            const tiles = [...document.querySelectorAll<HTMLButtonElement>('.tables .tile')]
+            if (!tiles.length) return
+            const index = tiles.indexOf(document.activeElement as HTMLButtonElement)
+            if (index < 0) return
+            event.preventDefault()
+            const delta = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
+            tiles[(index + delta + tiles.length) % tiles.length].focus()
+        }
+        window.addEventListener('keydown', onKeyDown)
+        return () => window.removeEventListener('keydown', onKeyDown)
+    }, [user, settings?.keyboardShortcuts])
+
     if (!settings) return null
     const t = (k: Parameters<typeof translate>[1], v?: Record<string, string | number>): string => translate(lang, k, v)
 

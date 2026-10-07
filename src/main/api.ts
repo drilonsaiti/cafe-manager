@@ -328,6 +328,8 @@ function cleanSetting(k: SettingKey, raw: unknown): string {
             return v === '1' ? '1' : '0'
         case 'cardEnabled':
             return v === '1' ? '1' : '0'
+        case 'keyboardShortcuts':
+            return v === '1' ? '1' : '0'
         case 'language':
             if (!['en', 'sq', 'mk'].includes(v)) throw new Error('Invalid language')
             return v

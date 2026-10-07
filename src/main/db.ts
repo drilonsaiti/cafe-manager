@@ -37,7 +37,8 @@ export const DEFAULTS: Settings = {
     printerName: '',
     silentPrint: '0',
     escposTarget: '',
-    paperChars: '48'
+    paperChars: '48',
+    keyboardShortcuts: '0'
 }
 
 const SCHEMA = `

@@ -355,6 +355,9 @@ function SettingsAdmin() {
                 <label className="check"><input type="checkbox" checked={s.cardEnabled === '1'}
                                                 onChange={(e) => set('cardEnabled', e.target.checked ? '1' : '0')}/>{t('acceptCard')}
                 </label>
+                <label className="check"><input type="checkbox" checked={s.keyboardShortcuts === '1'}
+                                                onChange={(e) => set('keyboardShortcuts', e.target.checked ? '1' : '0')}/>{t('keyboardShortcuts')}</label>
+                <p className="mute">{t('keyboardShortcutsHelp')}</p>
                 <button className="btn primary" onClick={async () => {
                     if (await save()) toast(t('settingsSaved'))
                 }}>{t('saveSettings')}</button>

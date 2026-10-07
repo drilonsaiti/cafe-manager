@@ -87,7 +87,7 @@ export interface HistoryRow {
 
 export type SettingKey =
     | 'cafeName' | 'address' | 'currency' | 'footer' | 'language' | 'layout' | 'cardEnabled'
-    | 'printMode' | 'printerName' | 'silentPrint' | 'escposTarget' | 'paperChars'
+    | 'printMode' | 'printerName' | 'silentPrint' | 'escposTarget' | 'paperChars' | 'keyboardShortcuts'
 export type Settings = Record<SettingKey, string>
 
 export interface Report {
