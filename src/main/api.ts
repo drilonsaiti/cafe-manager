@@ -435,6 +435,26 @@ export const api = {
         run('UPDATE cafe_tables SET active=0 WHERE id=?', id)
     },
 
+    deleteOrder(id: number): void {
+        const user = me()
+        int(id, 'order')
+        const order = one<{ status: string }>('SELECT status FROM orders WHERE id=?', id)
+        if (!order) throw new Error('Order not found')
+        if (order.status !== 'OPEN' && !user.isAdmin) throw new Error('Only an admin can delete a closed order')
+        tx(() => {
+            if (order.status === 'OPEN') {
+                run(`UPDATE products SET quantity=quantity+(SELECT COALESCE(SUM(i.qty),0)
+                     FROM order_items i WHERE i.order_id=? AND i.product_id=products.id) WHERE id IN
+                     (SELECT product_id FROM order_items WHERE order_id=? AND product_id IS NOT NULL)`, id, id)
+            }
+            run('DELETE FROM payments WHERE order_id=?', id)
+            run('DELETE FROM voids WHERE order_id=?', id)
+            run('DELETE FROM order_items WHERE order_id=?', id)
+            run('DELETE FROM orders WHERE id=?', id)
+        })
+        bumpMenu()
+    },
+
     // ---------- menu ----------
     listCategories: (includeInactive = false): Category[] =>
         all<Category>(`SELECT id, name, active
@@ -705,6 +725,23 @@ export const api = {
         const admin = !!me().isAdmin
         const f = admin ? from : Math.max(from, startOfToday())
         return {rows: queryOrders(f, to, admin), total: countOrders(f, to)}
+    },
+    resetBusinessData(confirmation: string): void {
+        adminUser()
+        if (confirmation !== 'DELETE ALL DATA') throw new Error('Type DELETE ALL DATA to confirm')
+        tx(() => {
+            // Open orders reserve stock; return those units before clearing the orders.
+            run(`UPDATE products SET quantity=quantity+(SELECT COALESCE(SUM(i.qty),0)
+                 FROM order_items i JOIN orders o ON o.id=i.order_id
+                 WHERE o.status='OPEN' AND i.product_id=products.id)
+                 WHERE id IN (SELECT i.product_id FROM order_items i JOIN orders o ON o.id=i.order_id
+                              WHERE o.status='OPEN' AND i.product_id IS NOT NULL)`)
+            run('DELETE FROM payments')
+            run('DELETE FROM voids')
+            run('DELETE FROM order_items')
+            run('DELETE FROM orders')
+        })
+        bumpMenu()
     },
     report(from: number, to: number): Report {
         return report(int(from, 'date', 0, 9e15), int(to, 'date', 0, 9e15))

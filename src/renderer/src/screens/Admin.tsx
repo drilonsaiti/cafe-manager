@@ -3,7 +3,7 @@ import {api} from '../api'
 import {useApp} from '../ctx'
 import {IconTrash} from '../icons'
 import {LANGS, useT} from '../i18n'
-import {Confirm, ReceiptPreview} from '../ui'
+import {Confirm, Modal, ReceiptPreview} from '../ui'
 import {msg, toCents} from '../util'
 import type {AdminProduct, Category, Employee, Settings, TableRow} from '../../../shared/types'
 import type {PreviewData} from '../../../main/print'
@@ -297,11 +297,13 @@ function EmpRow({e, act}: { e?: Employee; act: Act }) {
 }
 
 function SettingsAdmin() {
-    const {settings, reloadSettings, toast} = useApp()
+    const {settings, reloadSettings, reloadTables, toast} = useApp()
     const t = useT()
     const [s, setS] = useState<Settings>(settings)
     const [printers, setPrinters] = useState<{ name: string; label: string }[]>([])
     const [preview, setPreview] = useState<PreviewData | null>(null)
+    const [showReset, setShowReset] = useState(false)
+    const [resetText, setResetText] = useState('')
     useEffect(() => {
         api.listPrinters().then(setPrinters)
     }, [])
@@ -419,8 +421,23 @@ function SettingsAdmin() {
                         }
                     }}>{t('restore')}</button>
                 </div>
+                <h3>{t('dangerZone')}</h3>
+                <p className="mute">{t('resetBusinessDataHelp')}</p>
+                <button className="btn danger" onClick={() => { setResetText(''); setShowReset(true) }}>{t('resetBusinessData')}</button>
             </div>
             {preview && <ReceiptPreview rows={preview.rows} width={preview.width} onClose={() => setPreview(null)}/>}
+            {showReset && <Modal title={t('resetBusinessData')} onClose={() => setShowReset(false)}>
+                <p className="mute">{t('resetBusinessDataWarning')}</p>
+                <label className="field">{t('typeConfirmation')}<input value={resetText} onChange={(e) => setResetText(e.target.value)}/></label>
+                <button className="btn danger" disabled={resetText !== 'DELETE ALL DATA'} onClick={async () => {
+                    try {
+                        await api.resetBusinessData(resetText)
+                        await reloadTables()
+                        setShowReset(false)
+                        toast(t('businessDataDeleted'))
+                    } catch (e) { toast(msg(e), 'err') }
+                }}>{t('resetBusinessData')}</button>
+            </Modal>}
         </div>
     )
 }

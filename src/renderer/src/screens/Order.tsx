@@ -86,6 +86,7 @@ export default function OrderScreen({table, mode, onBack, onMoved, onOrder}: {
     const [top, setTop] = useState<Product[]>([])
     const [cat, setCat] = useState<number | null>(() => firstCategory(getMenu()))
     const [modal, setModal] = useState<null | 'pay' | 'move'>(null)
+    const [deleteAsk, setDeleteAsk] = useState(false)
     const [ask, setAsk] = useState<VoidAsk | null>(null)
     const orderRef = useRef<Order | null>(null) // the latest order, readable synchronously by optimistic updates
     const pending = useRef(0)
@@ -218,9 +219,12 @@ export default function OrderScreen({table, mode, onBack, onMoved, onOrder}: {
                     {mode === 'page' &&
                         <button className="icon-btn" aria-label={t('back')} onClick={onBack}><IconBack/></button>}
                     <h2>{table.name}</h2>
-                    <span className="saved grow"><IconCheck size={16}/>{t('saved')}</span>
-                    <button className="btn sm" disabled={!order} onClick={() => openModal('move')}><IconSwap
-                        size={18}/>{t('move')}</button>
+                    <span className="saved"><IconCheck size={16}/>{t('saved')}</span>
+                    <div className="ticket-actions">
+                        <button className="btn sm" disabled={!order} onClick={() => openModal('move')}><IconSwap
+                            size={18}/>{t('move')}</button>
+                        {order && <button className="btn sm danger" onClick={() => setDeleteAsk(true)}>{t('deleteOrder')}</button>}
+                    </div>
                 </header>
                 <div className="lines">
                     {loaded && !order && <div className="empty">{t('tapToStart')}</div>}
@@ -259,6 +263,15 @@ export default function OrderScreen({table, mode, onBack, onMoved, onOrder}: {
                     yes={t('voidItem')} onYes={confirmVoid} onNo={() => setAsk(null)}
                 />
             )}
+            {deleteAsk && order && <Confirm title={t('deleteOrder')} text={t('deleteOpenOrderWarning')}
+                                             yes={t('deleteOrder')} onNo={() => setDeleteAsk(false)} onYes={async () => {
+                try {
+                    await api.deleteOrder(order.id)
+                    setDeleteAsk(false)
+                    apply(null)
+                    onBack()
+                } catch (e) { toast(msg(e), 'err'); setDeleteAsk(false) }
+            }}/>}
         </div>
     )
 }

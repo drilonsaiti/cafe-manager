@@ -10,12 +10,14 @@ import type {HistoryPage, Order} from '../../../shared/types'
 import type {PreviewData} from '../../../main/print'
 
 export default function History() {
-    const {user, settings, toast} = useApp()
+    const {user, settings, toast, reloadTables} = useApp()
     const t = useT()
     const [range, setRange] = useState<Range>(todayRange())
     const [page, setPage] = useState<HistoryPage>({rows: [], total: 0})
     const [open, setOpen] = useState<Order | null>(null)
     const [preview, setPreview] = useState<PreviewData | null>(null)
+    const [deleteOrder, setDeleteOrder] = useState<Order | null>(null)
+    const [deleteText, setDeleteText] = useState('')
     const cur = settings.currency
     const admin = !!user.isAdmin
 
@@ -123,12 +125,26 @@ export default function History() {
                             {settings.printMode !== 'none' &&
                                 <button className="btn big" onClick={reprint}>{t('reprint')}</button>}
                         </div>
+                        {admin && <button className="btn danger" onClick={() => { setDeleteOrder(open); setDeleteText('') }}>{t('deleteOrder')}</button>}
                     </Modal>
                     {preview &&
                         <ReceiptPreview rows={preview.rows} width={preview.width} onClose={() => setPreview(null)}
                                         onPrint={settings.printMode !== 'none' ? reprint : undefined}/>}
                 </>
             )}
+            {deleteOrder && <Modal title={t('deleteOrder')} onClose={() => setDeleteOrder(null)}>
+                <p className="mute">{t('deleteOrderWarning', {id: deleteOrder.id})}</p>
+                <label className="field">{t('typeDelete')}<input value={deleteText} onChange={(e) => setDeleteText(e.target.value)}/></label>
+                <button className="btn danger" disabled={deleteText !== 'DELETE'} onClick={async () => {
+                    try {
+                        await api.deleteOrder(deleteOrder.id)
+                        setDeleteOrder(null); setOpen(null)
+                        const [from, to] = bounds(range); setPage(await api.listOrders(from, to))
+                        await reloadTables()
+                        toast(t('orderDeleted'))
+                    } catch (e) { toast(msg(e), 'err') }
+                }}>{t('deleteOrder')}</button>
+            </Modal>}
         </>
     )
 }

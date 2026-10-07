@@ -17,6 +17,9 @@
     --amber: #e8a317;
     --amber-bg: #fff6df;
     --amber-line: #f1d9a0;
+    --hover: #f6f8fa;
+    --hover-accent: #f6f8ff;
+    --hover-warm: #fff0c8;
     --r-lg: 20px;
     --r-md: 14px;
     --r-sm: 10px;
@@ -43,6 +46,9 @@ html[data-theme="dark"] {
     --amber: #edbd55;
     --amber-bg: #3a3120;
     --amber-line: #64512c;
+    --hover: #27313d;
+    --hover-accent: #293654;
+    --hover-warm: #493d27;
     --pop: 0 10px 28px rgba(0, 0, 0, .5)
 }
 
@@ -227,7 +233,7 @@ h4 {
 }
 
 .btn:hover {
-    background: #f6f8fa
+    background: var(--hover)
 }
 
 .btn:active {
@@ -283,7 +289,7 @@ h4 {
 }
 
 .icon-btn:hover {
-    background: #eef1f4;
+    background: var(--hover);
     color: var(--ink)
 }
 
@@ -482,6 +488,7 @@ h4 {
 
 .ticket > header {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     padding: 12px 14px 12px 10px;
@@ -489,6 +496,8 @@ h4 {
 }
 
 .ticket h2 {
+    flex: 1 1 120px;
+    min-width: 0;
     font-size: 24px;
     font-weight: 650;
     letter-spacing: -.01em
@@ -501,7 +510,16 @@ h4 {
     color: var(--free);
     font-size: 14px;
     font-weight: 600;
-    margin-left: 6px
+    margin-left: auto;
+    flex: 0 0 auto
+}
+
+.ticket-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex: 1 0 100%;
+    min-width: 0
 }
 
 .lines {
@@ -649,7 +667,7 @@ h4 {
 }
 
 .prod:hover {
-    background: #eef2f6
+    background: var(--hover)
 }
 
 .prod:active {
@@ -670,7 +688,7 @@ h4 {
 }
 
 .prod.hot:hover {
-    background: #fff0c8
+    background: var(--hover-warm)
 }
 
 /* ---------- dialogs ---------- */
@@ -920,7 +938,7 @@ h4 {
 }
 
 .grid-table tr.click:hover td {
-    background: #f6f8ff
+    background: var(--hover-accent)
 }
 
 .toolbar {
@@ -1225,15 +1243,15 @@ html[data-theme="dark"] .avatar {
 
 html[data-theme="dark"] .segmented { background: #141b23 }
 html[data-theme="dark"] .seg.on { background: #2b3541 }
-html[data-theme="dark"] .btn:hover { background: #27313d }
+html[data-theme="dark"] .btn:hover { background: var(--hover) }
 html[data-theme="dark"] .btn.primary,
 html[data-theme="dark"] .btn.primary:hover { background: #465fca; border-color: #465fca; color: #fff }
 html[data-theme="dark"] .btn.danger { background: var(--surface); color: var(--busy); border-color: var(--busy-line) }
-html[data-theme="dark"] .icon-btn:hover { background: #2a3440 }
+html[data-theme="dark"] .icon-btn:hover { background: var(--hover) }
 html[data-theme="dark"] .stepper { background: #2a3440 }
 html[data-theme="dark"] .stepper button:active { background: #435162 }
 html[data-theme="dark"] .prod { background: #252f3a; border-color: var(--line); color: var(--ink) }
-html[data-theme="dark"] .prod:hover { background: #303d4a }
+html[data-theme="dark"] .prod:hover { background: var(--hover) }
 html[data-theme="dark"] .prod.hot { background: var(--amber-bg); border-color: var(--amber-line) }
 html[data-theme="dark"] .prod:active { background: #465fca; border-color: #465fca; color: #fff }
 html[data-theme="dark"] .prod:active small { color: #e0e7ff }
