@@ -84,6 +84,7 @@ export default function OrderScreen({table, mode, onBack, onMoved, onOrder}: {
     const [loaded, setLoaded] = useState(false)
     const [menu, setMenuState] = useState<MenuView | null>(getMenu) // cached menu: first products are visible immediately
     const [top, setTop] = useState<Product[]>([])
+    const [productSearch, setProductSearch] = useState('')
     const [cat, setCat] = useState<number | null>(() => firstCategory(getMenu()))
     const [modal, setModal] = useState<null | 'pay' | 'move'>(null)
     const [deleteAsk, setDeleteAsk] = useState(false)
@@ -241,6 +242,11 @@ export default function OrderScreen({table, mode, onBack, onMoved, onOrder}: {
             </section>
 
             <section className="menu">
+                <input className="product-search" type="search" placeholder={t('searchProducts')} aria-label={t('searchProducts')}
+                       value={productSearch} onChange={(e) => setProductSearch(e.target.value)}/>
+                {productSearch.trim() ? ((menu?.products ?? EMPTY).some((p) => p.name.toLocaleLowerCase().includes(productSearch.trim().toLocaleLowerCase()))
+                    ? <ProductGrid products={(menu?.products ?? EMPTY).filter((p) => p.name.toLocaleLowerCase().includes(productSearch.trim().toLocaleLowerCase()))} cur={cur} onAdd={add}/>
+                    : <div className="empty">{t('noProductMatches')}</div>) : <>
                 <h4>{t('mostUsed')}</h4>
                 <ProductGrid products={top} cur={cur} hot onAdd={add}/>
                 <div className="segmented wrap">
@@ -248,6 +254,7 @@ export default function OrderScreen({table, mode, onBack, onMoved, onOrder}: {
                                                          onClick={() => setCat(c.id)}>{c.name}</button>)}
                 </div>
                 <ProductGrid products={(cat !== null && menu?.byCat.get(cat)) || EMPTY} cur={cur} onAdd={add}/>
+                </>}
             </section>
 
             {modal === 'pay' && order && <PayModal order={order} onClose={() => setModal(null)} onDone={() => {

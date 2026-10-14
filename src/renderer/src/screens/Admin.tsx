@@ -103,6 +103,7 @@ function MenuAdmin() {
     const [sel, setSel] = useState<number | null>(null)
     const [catName, setCatName] = useState('')
     const [pn, setPn] = useState('')
+    const [productSearch, setProductSearch] = useState('')
     const [pb, setPb] = useState('')
     const [pp, setPp] = useState('')
     const [pq, setPq] = useState('10')
@@ -155,12 +156,13 @@ function MenuAdmin() {
             </div>
             <div className="card">
                 <h3>{t('products')}</h3>
+                <input className="product-search" type="search" placeholder={t('searchProducts')} aria-label={t('searchProducts')} value={productSearch} onChange={(e) => setProductSearch(e.target.value)}/>
                 <div className="rowline headrow">
                     <span className="grow"/><span className="price">{t('buyPrice')}</span><span
                     className="price">{t('sellPrice')}</span><span className="price">{t('quantity')}</span><span className="catcol">{t('categoryCol')}</span><span
                     className="oncol">{t('onCol')}</span><span className="iconcol"/>
                 </div>
-                {prods.filter((p) => p.categoryId === sel).map((p) => (
+                {prods.filter((p) => p.categoryId === sel && p.name.toLocaleLowerCase().includes(productSearch.trim().toLocaleLowerCase())).map((p) => (
                     <ProductRow key={p.id + ':' + p.name + p.priceCents + p.costCents} p={p} cats={cats} act={act}
                                 onDelete={setDelProd}/>
                 ))}

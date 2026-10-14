@@ -16,6 +16,7 @@ export default function Reports() {
     const [sort, setSort] = useState<'qty' | 'profit'>('qty')
     const [productPage, setProductPage] = useState(0)
     const [inventoryPage, setInventoryPage] = useState(0)
+    const [productSearch, setProductSearch] = useState('')
     const cur = settings.currency
     const [from, to] = bounds(range)
 
@@ -47,9 +48,11 @@ export default function Reports() {
         ...(settings.cardEnabled === '1' || r.card > 0 ? [[t('card'), money(r.card, cur)] as [string, string]] : [])
     ] : []
     const pageSize = 20
-    const sortedTop = r ? [...r.top].sort((a, b) => (sort === 'qty' ? b.qty - a.qty : b.profit - a.profit)) : []
+    const query = productSearch.trim().toLocaleLowerCase()
+    const sortedTop = r ? [...r.top].filter((p) => p.name.toLocaleLowerCase().includes(query)).sort((a, b) => (sort === 'qty' ? b.qty - a.qty : b.profit - a.profit)) : []
     const top = sortedTop.slice(productPage * pageSize, (productPage + 1) * pageSize)
-    const inventory = r?.inventory.slice(inventoryPage * pageSize, (inventoryPage + 1) * pageSize) ?? []
+    const filteredInventory = r?.inventory.filter((p) => p.name.toLocaleLowerCase().includes(query)) ?? []
+    const inventory = filteredInventory.slice(inventoryPage * pageSize, (inventoryPage + 1) * pageSize)
 
     return (
         <>
@@ -80,6 +83,7 @@ export default function Reports() {
                                             onClick={() => { setSort('profit'); setProductPage(0) }}>{t('sortProfit')}</button>
                                 </div>
                             </div>
+                            <input className="product-search" type="search" placeholder={t('searchProducts')} aria-label={t('searchProducts')} value={productSearch} onChange={(e) => { setProductSearch(e.target.value); setProductPage(0); setInventoryPage(0) }}/>
                             <table className="grid-table">
                                 <thead>
                                 <tr>
@@ -97,7 +101,7 @@ export default function Reports() {
                                     <td className="num">{money(p.profit, cur)}</td>
                                 </tr>)}
                                 {sortedTop.length === 0 && <tr>
-                                    <td colSpan={4} className="empty">{t('noSales')}</td>
+                                    <td colSpan={4} className="empty">{query ? t('noProductMatches') : t('noSales')}</td>
                                 </tr>}
                                 </tbody>
                             </table>
@@ -135,9 +139,9 @@ export default function Reports() {
                         <table className="grid-table">
                             <thead><tr><th>{t('product')}</th><th className="num">{t('quantity')}</th></tr></thead>
                             <tbody>{inventory.map((p) => <tr key={p.name}><td>{p.name}</td><td className="num">{p.quantity}</td></tr>)}
-                            {r.inventory.length === 0 && <tr><td colSpan={2} className="empty">{t('noProducts')}</td></tr>}</tbody>
+                            {filteredInventory.length === 0 && <tr><td colSpan={2} className="empty">{query ? t('noProductMatches') : t('noProducts')}</td></tr>}</tbody>
                         </table>
-                        <Pager page={inventoryPage} total={r.inventory.length} pageSize={pageSize} onChange={setInventoryPage}/>
+                        <Pager page={inventoryPage} total={filteredInventory.length} pageSize={pageSize} onChange={setInventoryPage}/>
                     </section>
                 </>
             )}
